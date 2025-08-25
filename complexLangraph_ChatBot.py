@@ -40,15 +40,57 @@ def classify_message(state: State):
             - 'emotional': if it asks for emotional support, therapy, deals with feelings, or personal problems
             - 'logical': if it asks for facts, information, logical analysis, or practical solutions
             """
+        },
+        {
+            "role":"user",
+            "content": lastmessage.content
         }
+        
     ])
+    return {"message_type": result.message_type}
     
 
 def router(state: State):
-    pass
+    message_type = state.get("message_type", "logical")
+    if message_type == "emotional":
+        return {next: "therapist"}
+    
+    return {next: "logical"}
 
 def therapist_agent(state: State):
-    pass
+    lastmessage = state["messages"][-1]
+    
+    message = [
+        {
+            "role": "system",
+            "content": """You are a compassionate therapist. Focus on the emotional aspects of the user's message.
+                        Show empathy, validate their feelings, and help them process their emotions.
+                        Ask thoughtful questions to help them explore their feelings more deeply.
+                        Avoid giving logical solutions unless explicitly asked."""
+        },
+        {
+            "role": "user",
+            "content": lastmessage.content
+        }
+    ]
+    reply = llm.invoke(message)
+    return {"messages":[{"role":"assistant", "content": reply.content}]}
 
 def logical_agent(state: State):
-    pass
+    lastmessage = state["messages"][-1]
+    
+    message = [
+        {
+            "role": "system",
+            "content": """You are a purely logical assistant. Focus only on facts and information.
+                        Provide clear, concise answers based on logic and evidence.
+                        Do not address emotions or provide emotional support.
+                        Be direct and straightforward in your responses."""
+        },
+        {
+            "role": "user",
+            "content": lastmessage.content
+        }
+    ]
+    reply = llm.invoke(message)
+    return {"messages":[{"role":"assistant", "content": reply.content}]}
