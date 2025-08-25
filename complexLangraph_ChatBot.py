@@ -1,19 +1,19 @@
-## so the graph would be like,, Start -- classifier -- router-- logical -- therapist -- end.
-
+import os
 from dotenv import load_dotenv
 from typing import Annotated, Literal
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI  
 from pydantic import BaseModel, Field
 from typing_extensions import NotRequired, TypedDict
+
 load_dotenv()
 
-print("fuck moni")
-
+# Fix the model name and add structured output method
 llm = ChatOpenAI(
-    model_name="gpt-4o-mini",  # specify GPT-4o-mini
-    temperature=0.7,            # optional: controls creativity
+    model="gpt-4o",  # Use gpt-4o for structured output support
+    temperature=0.7, 
+    openai_api_key=os.getenv("OPENAI_API_KEY")
 )
 
 class MessageClassifier(BaseModel):
@@ -23,42 +23,43 @@ class MessageClassifier(BaseModel):
     )
 
 class State(TypedDict):
-    messages:Annotated[list, add_messages]
+    messages: Annotated[list, add_messages]
     message_type: str | None
-    
 
-    
 def classify_message(state: State):
-    lastmessage = state["messages"][-1]
-    classifier_llm = llm.with_structured_output(MessageClassifier)
+    last_message = state["messages"][-1]
+    
+    # Fix: Specify method for older models
+    classifier_llm = llm.with_structured_output(MessageClassifier, method="function_calling")
     
     result = classifier_llm.invoke([
-        
         {
             "role": "system",
-            "content": """ Classify the user message as either:
+            "content": """Classify the user message as either:
             - 'emotional': if it asks for emotional support, therapy, deals with feelings, or personal problems
             - 'logical': if it asks for facts, information, logical analysis, or practical solutions
             """
         },
         {
-            "role":"user",
-            "content": lastmessage.content
+            "role": "user",
+            "content": last_message.content
         }
-        
     ])
-    return {"message_type": result.message_type}
     
+    print(f"Classified as: {result.message_type}")  # Debug print
+    return {"message_type": result.message_type}
 
+# Fix: Router should return string directly, not dict
 def router(state: State):
     message_type = state.get("message_type", "logical")
-    if message_type == "emotional":
-        return {next: "therapist"}
+    print(f"Routing to: {message_type}")  # Debug print
     
-    return {next: "logical"}
+    if message_type == "emotional":
+        return "therapist"  # Return string directly
+    return "logical"  # Return string directly
 
 def therapist_agent(state: State):
-    lastmessage = state["messages"][-1]
+    last_message = state["messages"][-1]
     
     message = [
         {
@@ -70,14 +71,15 @@ def therapist_agent(state: State):
         },
         {
             "role": "user",
-            "content": lastmessage.content
+            "content": last_message.content
         }
     ]
+    
     reply = llm.invoke(message)
-    return {"messages":[{"role":"assistant", "content": reply.content}]}
+    return {"messages": [{"role": "assistant", "content": reply.content}]}
 
 def logical_agent(state: State):
-    lastmessage = state["messages"][-1]
+    last_message = state["messages"][-1]
     
     message = [
         {
@@ -89,30 +91,30 @@ def logical_agent(state: State):
         },
         {
             "role": "user",
-            "content": lastmessage.content
+            "content": last_message.content
         }
     ]
+    
     reply = llm.invoke(message)
-    return {"messages":[{"role":"assistant", "content": reply.content}]}
+    return {"messages": [{"role": "assistant", "content": reply.content}]}
 
+# Build the graph
 graph_builder = StateGraph(State)
 
 graph_builder.add_node("classifier", classify_message)
-graph_builder.add_node("router", router)
 graph_builder.add_node("therapist", therapist_agent)
 graph_builder.add_node("logical", logical_agent)
 
 graph_builder.add_edge(START, "classifier")
-graph_builder.add_edge("classifier", "router")
 
+# Fix: Use router function directly and correct mapping
 graph_builder.add_conditional_edges(
-    "router",
-    lambda state: state.get(next),
+    "classifier",  # Start from classifier, not router
+    router,        # Use router function directly
     {
-        "emotional": "therapist",
-        "logical": "logical"
+        "therapist": "therapist",  # Map return value to node name
+        "logical": "logical"       # Map return value to node name
     }
-    
 )
 
 graph_builder.add_edge("therapist", END)
@@ -125,20 +127,30 @@ def run_chatbot():
 
     while True:
         user_input = input("Message: ")
-        if user_input == "exit":
+        if user_input.lower() == "exit":
             print("Bye")
             break
 
+        # Add user message to state
         state["messages"] = state.get("messages", []) + [
             {"role": "user", "content": user_input}
         ]
 
-        state = graph.invoke(state)
-
-        if state.get("messages") and len(state["messages"]) > 0:
-            last_message = state["messages"][-1]
-            print(f"Assistant: {last_message.content}")
-
+        # Process through graph
+        try:
+            state = graph.invoke(state)
+            
+            # Get the last assistant message
+            if state.get("messages") and len(state["messages"]) > 0:
+                last_message = state["messages"][-1]
+                if hasattr(last_message, 'content'):
+                    print(f"Assistant: {last_message.content}")
+                else:
+                    print(f"Assistant: {last_message['content']}")
+        
+        except Exception as e:
+            print(f"Error: {e}")
+            break
 
 if __name__ == "__main__":
     run_chatbot()
